@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>PDF Auto-Redactor</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --border: #2a2e38;
+    --text: #e8e9ed;
+    --muted: #9098a8;
+    --accent: #d64545;
+    --accent-hover: #c53a3a;
+    --ok: #4caf7d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 48px 20px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 32px;
+    width: 100%;
+    max-width: 560px;
+  }
+  h1 {
+    font-size: 20px;
+    margin: 0 0 4px;
+    letter-spacing: -0.01em;
+  }
+  .sub {
+    color: var(--muted);
+    font-size: 13px;
+    margin: 0 0 28px;
+    line-height: 1.5;
+  }
+  label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: var(--text);
+  }
+  .field {
+    margin-bottom: 20px;
+  }
+  .hint {
+    color: var(--muted);
+    font-size: 12px;
+    margin-top: 6px;
+  }
+  input[type="text"] {
+    width: 100%;
+    background: #0f1115;
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: inherit;
+  }
+  input[type="text"]:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .dropzone {
+    border: 1.5px dashed var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    position: relative;
+  }
+  .dropzone:hover, .dropzone.drag {
+    border-color: var(--accent);
+    background: rgba(214,69,69,0.05);
+  }
+  .dropzone input[type=file] {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+  .dropzone .fname {
+    color: var(--ok);
+    font-weight: 600;
+    font-size: 13px;
+    margin-top: 4px;
+    word-break: break-all;
+  }
+  .dropzone .placeholder {
+    color: var(--muted);
+    font-size: 13px;
+  }
+  button {
+    width: 100%;
+    background: var(--accent);
+    color: white;
+    border: none;
+    padding: 13px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  button:hover:not(:disabled) { background: var(--accent-hover); }
+  button:disabled {
+    background: #3a3d46;
+    color: var(--muted);
+    cursor: not-allowed;
+  }
+  .status {
+    margin-top: 16px;
+    font-size: 13px;
+    color: var(--muted);
+    min-height: 18px;
+    line-height: 1.5;
+  }
+  .status.ok { color: var(--ok); }
+  .status.err { color: var(--accent); }
+  .progress-bar {
+    width: 100%;
+    height: 6px;
+    background: #0f1115;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 12px;
+    display: none;
+  }
+  .progress-bar .fill {
+    height: 100%;
+    width: 0%;
+    background: var(--accent);
+    transition: width 0.2s;
+  }
+  .footer-note {
+    margin-top: 24px;
+    font-size: 11.5px;
+    color: var(--muted);
+    line-height: 1.6;
+    border-top: 1px solid var(--border);
+    padding-top: 16px;
+  }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <h1>PDF Auto-Redactor</h1>
+  <p class="sub">Runs entirely in your browser — your PDF is never uploaded anywhere. Pick a file, list the words or phrases to remove, and download the redacted copy.</p>
+
+  <div class="field">
+    <label>PDF file</label>
+    <div class="dropzone" id="dropzone">
+      <input type="file" id="fileInput" accept="application/pdf">
+      <div class="placeholder" id="dzPlaceholder">Click to choose a PDF, or drag one here</div>
+      <div class="fname" id="dzFilename"></div>
+    </div>
+  </div>
+
+  <div class="field">
+    <label>Words / phrases to redact</label>
+    <input type="text" id="termsInput" placeholder="e.g. John Smith, 123 Main Street, ACME BV">
+    <div class="hint">Separate multiple items with commas. Matching is case-insensitive.</div>
+  </div>
+
+  <div class="field">
+    <label>Output filename</label>
+    <input type="text" id="filenameInput" placeholder="redacted.pdf" value="redacted.pdf">
+  </div>
+
+  <button id="runBtn" disabled>Redact &amp; Download</button>
+
+  <div class="progress-bar" id="progressBar"><div class="fill" id="progressFill"></div></div>
+  <div class="status" id="status"></div>
+
+  <div class="footer-note">
+    How it works: each page is scanned for the text you entered, matching regions are blacked out, then every page is flattened into a fresh image-based PDF. This means the original text underneath is fully destroyed — not just visually covered — so it can't be recovered by copying text or lifting the black box. The tradeoff is the output PDF is no longer text-searchable/selectable.
+  </div>
+</div>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+const fileInput = document.getElementById('fileInput');
+const dropzone = document.getElementById('dropzone');
+const dzPlaceholder = document.getElementById('dzPlaceholder');
+const dzFilename = document.getElementById('dzFilename');
+const termsInput = document.getElementById('termsInput');
+const filenameInput = document.getElementById('filenameInput');
+const runBtn = document.getElementById('runBtn');
+const statusEl = document.getElementById('status');
+const progressBar = document.getElementById('progressBar');
+const progressFill = document.getElementById('progressFill');
+
+let selectedFile = null;
+
+function setStatus(msg, cls) {
+  statusEl.textContent = msg;
+  statusEl.className = 'status' + (cls ? (' ' + cls) : '');
+}
+
+function checkReady() {
+  runBtn.disabled = !(selectedFile && termsInput.value.trim().length > 0);
+}
+
+fileInput.addEventListener('change', (e) => {
+  const f = e.target.files[0];
+  if (f) {
+    selectedFile = f;
+    dzPlaceholder.style.display = 'none';
+    dzFilename.textContent = f.name;
+    setStatus('');
+  }
+  checkReady();
+});
+
+['dragenter','dragover'].forEach(evt => {
+  dropzone.addEventListener(evt, (e) => { e.preventDefault(); dropzone.classList.add('drag'); });
+});
+['dragleave','drop'].forEach(evt => {
+  dropzone.addEventListener(evt, (e) => { e.preventDefault(); dropzone.classList.remove('drag'); });
+});
+dropzone.addEventListener('drop', (e) => {
+  const f = e.dataTransfer.files[0];
+  if (f && f.type === 'application/pdf') {
+    fileInput.files = e.dataTransfer.files;
+    selectedFile = f;
+    dzPlaceholder.style.display = 'none';
+    dzFilename.textContent = f.name;
+  }
+  checkReady();
+});
+
+termsInput.addEventListener('input', checkReady);
+
+// Build a flat, searchable representation of a page's text, with a mapping
+// back to the source text items so match ranges can be translated into
+// bounding boxes.
+function buildPageIndex(items) {
+  let fullText = '';
+  const map = []; // parallel array: {itemIdx, charIdx} or null for inserted separators
+
+  items.forEach((item, itemIdx) => {
+    if (!item.str) return;
+    if (fullText.length > 0) {
+      const prevChar = fullText[fullText.length - 1];
+      const nextChar = item.str[0];
+      if (prevChar !== ' ' && nextChar !== ' ') {
+        fullText += ' ';
+        map.push(null);
+      }
+    }
+    for (let c = 0; c < item.str.length; c++) {
+      fullText += item.str[c];
+      map.push({ itemIdx, charIdx: c });
+    }
+  });
+
+  return { fullText, map };
+}
+
+function findMatchRanges(fullText, term) {
+  const ranges = [];
+  const hay = fullText.toLowerCase();
+  const needle = term.toLowerCase();
+  if (!needle) return ranges;
+  let from = 0;
+  while (true) {
+    const idx = hay.indexOf(needle, from);
+    if (idx === -1) break;
+    ranges.push([idx, idx + needle.length]);
+    from = idx + needle.length;
+  }
+  return ranges;
+}
+
+// Convert a match range into one bounding rect per contributing item
+function rectsForRange(range, map, items) {
+  const [start, end] = range;
+  const byItem = new Map();
+  for (let i = start; i < end; i++) {
+    const m = map[i];
+    if (!m) continue;
+    if (!byItem.has(m.itemIdx)) byItem.set(m.itemIdx, { min: m.charIdx, max: m.charIdx });
+    else {
+      const r = byItem.get(m.itemIdx);
+      r.min = Math.min(r.min, m.charIdx);
+      r.max = Math.max(r.max, m.charIdx);
+    }
+  }
+  const rects = [];
+  byItem.forEach((range2, itemIdx) => {
+    const item = items[itemIdx];
+    const t = item.transform;
+    const x0base = t[4];
+    const y0 = t[5];
+    const height = item.height || Math.hypot(t[2], t[3]) || 10;
+    const totalW = item.width || 1;
+    const len = item.str.length || 1;
+    const charW = totalW / len;
+    const x0 = x0base + charW * range2.min;
+    const x1 = x0base + charW * (range2.max + 1);
+    rects.push({ x0, y0, x1, y1: y0 + height });
+  });
+  return rects;
+}
+
+async function redactPdf(file, terms, onProgress) {
+  const arrayBuf = await file.arrayBuffer();
+  const loadingTask = pdfjsLib.getDocument({ data: arrayBuf });
+  const pdf = await loadingTask.promise;
+  const numPages = pdf.numPages;
+
+  const outDoc = await PDFLib.PDFDocument.create();
+  const SCALE = 2.0; // render scale for quality
+
+  for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+    onProgress(pageNum, numPages);
+
+    const page = await pdf.getPage(pageNum);
+    const viewport = page.getViewport({ scale: SCALE });
+
+    const canvas = document.createElement('canvas');
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    const ctx = canvas.getContext('2d');
+
+    await page.render({ canvasContext: ctx, viewport }).promise;
+
+    const textContent = await page.getTextContent({ normalizeWhitespace: true });
+    const items = textContent.items;
+    const { fullText, map } = buildPageIndex(items);
+
+    let allRects = [];
+    for (const term of terms) {
+      const ranges = findMatchRanges(fullText, term);
+      for (const range of ranges) {
+        allRects = allRects.concat(rectsForRange(range, map, items));
+      }
+    }
+
+    ctx.fillStyle = '#000000';
+    const pad = 1.5; // px padding around each box
+    for (const r of allRects) {
+      const p1 = viewport.convertToViewportPoint(r.x0, r.y0);
+      const p2 = viewport.convertToViewportPoint(r.x1, r.y1);
+      const x0 = Math.min(p1[0], p2[0]) - pad;
+      const x1 = Math.max(p1[0], p2[0]) + pad;
+      const y0 = Math.min(p1[1], p2[1]) - pad;
+      const y1 = Math.max(p1[1], p2[1]) + pad;
+      ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+    }
+
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+    const jpgBytes = await (await fetch(dataUrl)).arrayBuffer();
+    const jpgImage = await outDoc.embedJpg(jpgBytes);
+
+    const pageWidthPt = viewport.width / SCALE;
+    const pageHeightPt = viewport.height / SCALE;
+    const outPage = outDoc.addPage([pageWidthPt, pageHeightPt]);
+    outPage.drawImage(jpgImage, { x: 0, y: 0, width: pageWidthPt, height: pageHeightPt });
+  }
+
+  return await outDoc.save();
+}
+
+runBtn.addEventListener('click', async () => {
+  if (!selectedFile) return;
+  const terms = termsInput.value.split(',').map(s => s.trim()).filter(Boolean);
+  if (terms.length === 0) { setStatus('Enter at least one word or phrase.', 'err'); return; }
+
+  let outName = filenameInput.value.trim() || 'redacted.pdf';
+  if (!outName.toLowerCase().endsWith('.pdf')) outName += '.pdf';
+
+  runBtn.disabled = true;
+  progressBar.style.display = 'block';
+  progressFill.style.width = '0%';
+  setStatus('Reading PDF…');
+
+  try {
+    const bytes = await redactPdf(selectedFile, terms, (cur, total) => {
+      progressFill.style.width = Math.round((cur / total) * 100) + '%';
+      setStatus(`Redacting page ${cur} of ${total}…`);
+    });
+
+    const blob = new Blob([bytes], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = outName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    setStatus('Done — redacted file downloaded.', 'ok');
+  } catch (err) {
+    console.error(err);
+    setStatus('Something went wrong: ' + err.message, 'err');
+  } finally {
+    runBtn.disabled = false;
+    progressBar.style.display = 'none';
+  }
+});
+</script>
+</body>
+</html>
